@@ -501,8 +501,153 @@ except ImportError:
 	COMPREHENSIVE_JUDGE_AVAILABLE = False
 
 	async def evaluate_task_with_comprehensive_judge(*args, **kwargs) -> dict[str, Any]:
-		"""Fallback function when comprehensive judge system is not available"""
-		raise ImportError('Comprehensive judge system not available')
+		"""Fallback function when comprehensive judge is not available"""
+		return {}
+
+# ==============================================================================================================
+# Browser Session Factory for Parallel Execution
+# ==============================================================================================================
+
+import uuid
+from browser_use.browser.session import BrowserSession
+from browser_use.browser.profile import BrowserProfile, BrowserChannel
+from browser_use.browser.types import async_playwright, async_patchright
+from typing import Dict
+
+class IsolatedBrowserSession(BrowserSession):
+	"""Browser session with enhanced isolation for parallel execution"""
+	
+	def __init__(self, *args, **kwargs):
+		super().__init__(*args, **kwargs)
+		# Force creation of unique playwright instance per session
+		self._force_unique_playwright = True
+		
+	async def setup_playwright(self) -> None:
+		"""Override to force unique playwright instances for each session"""
+		# Always create a fresh playwright instance for this session
+		# This prevents the global instance sharing that causes conflicts
+		is_stealth = self.browser_profile.stealth
+		
+		if is_stealth:
+			self.browser_profile.channel = self.browser_profile.channel or BrowserChannel.CHROME
+			self.logger.info(f'🕶️ Creating isolated stealth patchright instance for session {self.id[-4:]}')
+			self.playwright = await async_patchright().start()
+		else:
+			self.browser_profile.channel = self.browser_profile.channel or BrowserChannel.CHROMIUM
+			self.logger.debug(f'🎭 Creating isolated playwright instance for session {self.id[-4:]}')
+			self.playwright = await async_playwright().start()
+			
+		# Don't use global instances - this is the key fix
+		# Each session gets its own isolated playwright instance
+		
+	async def kill(self) -> None:
+		"""Enhanced cleanup with proper playwright instance disposal"""
+		try:
+			# Stop the browser first
+			await super().kill()
+		finally:
+			# Always clean up the playwright instance
+			if self.playwright:
+				try:
+					await self.playwright.stop()
+					# Give it time to clean up properly
+					await asyncio.sleep(0.1)
+				except Exception as e:
+					self.logger.debug(f'Playwright cleanup error (expected): {type(e).__name__}: {e}')
+				finally:
+					self.playwright = None
+
+
+class BrowserSessionFactory:
+	"""Factory for creating properly isolated browser sessions for parallel execution"""
+	
+	def __init__(self):
+		self._active_sessions: Dict[str, IsolatedBrowserSession] = {}
+		self._session_lock = threading.Lock()
+		
+	def create_session(self, task_id: str, headless: bool, highlight_elements: bool = True) -> IsolatedBrowserSession:
+		"""Create a new isolated browser session"""
+		with self._session_lock:
+			# Generate unique session ID with timestamp and random component
+			timestamp = int(time.time() * 1000)
+			session_id = f"eval_{task_id}_{timestamp}_{uuid.uuid4().hex[:8]}"
+			
+			# Create profile with enhanced isolation settings
+			profile = BrowserProfile(
+				user_data_dir=None,  # Always use incognito for isolation
+				headless=headless,
+				chromium_sandbox=False,  # Required for Docker
+				highlight_elements=highlight_elements,
+				keep_alive=False,  # Always clean up
+				# Enhanced Chrome args for isolation
+				args=[
+					'--remote-debugging-port=0',  # Auto-assign port
+					f'--user-agent-suffix=" Eval-{task_id}"',
+					'--disable-dev-shm-usage',  # Critical for parallel execution
+					'--disable-extensions',  # Prevent extension conflicts
+					'--disable-default-apps',
+					'--no-first-run',
+					'--no-default-browser-check',
+					'--disable-backgrounding-occluded-windows',
+					'--disable-renderer-backgrounding',
+					'--disable-background-timer-throttling',
+					'--disable-hang-monitor',
+					'--disable-prompt-on-repost',
+					'--disable-sync',
+					'--disable-translate',
+					'--disable-web-security',
+					'--allow-running-insecure-content',
+					'--ignore-certificate-errors',
+					'--ignore-ssl-errors',
+					'--disable-features=VizDisplayCompositor,TranslateUI,BlinkGenPropertyTrees',
+					'--force-device-scale-factor=1',  # Consistent rendering
+					'--disable-ipc-flooding-protection',  # Allow rapid operations
+					# Memory and process isolation
+					'--max_old_space_size=2048',  # Limit memory per browser
+					'--process-per-site',  # Better process isolation
+					'--site-per-process',  # Enhanced security boundaries
+				],
+				# Optimized timeouts for parallel execution
+				timeout=120_000,  # 2 minutes for browser launch
+				default_timeout=45_000,  # 45 seconds for operations
+				default_navigation_timeout=45_000,  # 45 seconds for navigation
+				wait_for_network_idle_page_load_time=2.0,
+				maximum_wait_page_load_time=8.0,
+				wait_between_actions=0.2,
+			)
+			
+			# Create isolated session
+			session = IsolatedBrowserSession(id=session_id, browser_profile=profile)
+			self._active_sessions[session_id] = session
+			
+			return session
+	
+	async def cleanup_session(self, session: IsolatedBrowserSession):
+		"""Safely cleanup a browser session"""
+		with self._session_lock:
+			session_id = session.id
+			if session_id in self._active_sessions:
+				del self._active_sessions[session_id]
+		
+		try:
+			await session.kill()
+		except Exception as e:
+			# Log but don't fail on cleanup errors
+			session.logger.debug(f'Session cleanup error (expected): {type(e).__name__}: {e}')
+	
+	async def cleanup_all(self):
+		"""Emergency cleanup of all active sessions"""
+		sessions = list(self._active_sessions.values())
+		self._active_sessions.clear()
+		
+		cleanup_tasks = [self.cleanup_session(session) for session in sessions]
+		if cleanup_tasks:
+			await asyncio.gather(*cleanup_tasks, return_exceptions=True)
+
+# Global factory instance
+_browser_factory = BrowserSessionFactory()
+
+# ==============================================================================================================
 
 
 class Stage(Enum):
@@ -1257,46 +1402,57 @@ async def run_stage(stage: Stage, stage_func, timeout: int | None = None):
 	return await stage_func()
 
 
-async def setup_browser_session(task: Task, headless: bool, highlight_elements: bool = True) -> BrowserSession:
-	"""Setup browser session for the task"""
-	logger.debug(f'Browser setup: Initializing BrowserSession for task {task.task_id}')
+async def setup_browser_session(task: Task, headless: bool, highlight_elements: bool = True) -> IsolatedBrowserSession:
+	"""Setup browser session for the task with proper isolation for parallel execution"""
+	logger.debug(f'Browser setup: Initializing isolated BrowserSession for task {task.task_id}')
 
-	# Use incognito mode (user_data_dir=None) for evaluations to avoid state pollution
-	profile = BrowserProfile(
-		user_data_dir=None,  # Incognito mode - no persistent state
-		headless=headless,
-		chromium_sandbox=False,  # running in docker
-		highlight_elements=highlight_elements,  # Control element highlighting (passed to profile)
-		keep_alive=True,
-		# higher timeouts = higher success rates on long tail of slow sites or if on a slow CI server
-		# timeout=60_000,
-		# default_timeout=60_000,
-		# default_navigation_timeout=60_000,
-		# wait_for_network_idle_page_load_time=60.0,
-		# maximum_wait_page_load_time=60.0,
-		# wait_between_actions=0.5,
-		# ignore_https_errors=True,  # some eval tasks have http:// or broken https sites in them
-	)
+	# Use the factory to create an isolated browser session
+	browser_session = _browser_factory.create_session(task.task_id, headless, highlight_elements)
 
-	browser_session = BrowserSession(browser_profile=profile)
+	try:
+		# Start browser session with retry logic for parallel execution
+		max_retries = 3
+		for attempt in range(max_retries):
+			try:
+				logger.debug(f'Browser setup: Starting browser session for task {task.task_id} (attempt {attempt + 1}/{max_retries})')
+				await browser_session.start()
+				logger.debug(f'Browser setup: Browser session started successfully for task {task.task_id}')
+				break
+			except Exception as e:
+				logger.warning(f'Browser setup: Attempt {attempt + 1} failed for task {task.task_id}: {type(e).__name__}: {e}')
+				if attempt == max_retries - 1:
+					raise
+				# Wait with exponential backoff before retry
+				await asyncio.sleep(0.5 * (2 ** attempt))
+				# Reset browser session state for retry
+				try:
+					await _browser_factory.cleanup_session(browser_session)
+				except Exception:
+					pass
+				# Create fresh browser session for retry
+				browser_session = _browser_factory.create_session(f"{task.task_id}_retry_{attempt}", headless, highlight_elements)
 
-	# Start browser session
-	logger.debug(f'Browser setup: Starting browser session for task {task.task_id}')
-	await browser_session.start()
-	logger.debug(f'Browser setup: Browser session started for task {task.task_id}')
+		# Navigate to task starting url if provided
+		if task.website:
+			logger.debug(f'Browser setup: Navigating to {task.website} for task {task.task_id}')
+			await browser_session.navigate(task.website)
 
-	# Navigate to task starting url if provided
-	if task.website:
-		logger.debug(f'Browser setup: Navigating to {task.website} for task {task.task_id}')
-		await browser_session.navigate(task.website)
+		logger.debug(f'Browser setup: Setup completed for task {task.task_id}')
+		return browser_session
 
-	logger.debug(f'Browser setup: Setup completed for task {task.task_id}')
-	return browser_session
+	except Exception as e:
+		logger.error(f'Browser setup: Failed to setup browser for task {task.task_id}: {type(e).__name__}: {e}')
+		# Cleanup on failure
+		try:
+			await _browser_factory.cleanup_session(browser_session)
+		except Exception:
+			pass
+		raise
 
 
 @observe(name='executor', span_type='EXECUTOR')  # type: ignore[arg-type]
 async def run_agent_with_browser(
-	browser_session: BrowserSession,
+	browser_session: IsolatedBrowserSession,
 	task: Task,
 	llm: BaseChatModel,
 	max_steps: int,
@@ -1348,11 +1504,11 @@ def save_result_to_server(convex_url: str, secret_key: str, payload: dict) -> bo
 	return save_task_result_to_server(convex_url, secret_key, payload)
 
 
-async def cleanup_browser_safe(browser_session: BrowserSession):
-	"""Safe browser cleanup with timeout"""
+async def cleanup_browser_safe(browser_session: IsolatedBrowserSession):
+	"""Safe browser cleanup with timeout using the factory"""
 	try:
 		logger.debug('Browser cleanup: Starting close operation for session')
-		await asyncio.wait_for(browser_session.kill(), timeout=30)
+		await asyncio.wait_for(_browser_factory.cleanup_session(browser_session), timeout=30)
 		logger.debug('Browser cleanup: Close operation completed successfully')
 	except TimeoutError:
 		logger.warning('Browser cleanup: Timed out after 30 seconds')
@@ -1825,6 +1981,14 @@ async def run_multiple_tasks(
 
 		await stop_resource_monitoring()
 		log_system_resources('BATCH_CLEANUP')
+		
+		# Emergency cleanup of any remaining browser sessions
+		try:
+			logger.info('🧹 Performing emergency browser session cleanup...')
+			await _browser_factory.cleanup_all()
+			logger.info('✅ Emergency browser session cleanup completed')
+		except Exception as cleanup_error:
+			logger.error(f'❌ Error during emergency browser cleanup: {type(cleanup_error).__name__}: {cleanup_error}')
 
 	# Process task results and handle any exceptions returned by gather
 	processed_results = []
