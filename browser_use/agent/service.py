@@ -335,38 +335,36 @@ class Agent(Generic[Context]):
 		# assert not (browser_session and browser_context), 'Cannot provide both browser_session and browser_context'
 		browser_profile = browser_profile or DEFAULT_BROWSER_PROFILE
 
-		# if browser_session:
-		# 	# Check if user is trying to reuse an uninitialized session
-		# 	if browser_session.browser_profile.keep_alive and not browser_session.initialized:
-		# 		self.logger.error(
-		# 			'❌ Passed a BrowserSession with keep_alive=True that is not initialized. '
-		# 			'Call await browser_session.start() before passing it to Agent() to reuse the same browser. '
-		# 			'Otherwise, each agent will launch its own browser instance.'
-		# 		)
-		# 		raise ValueError(
-		# 			'BrowserSession with keep_alive=True must be initialized before passing to Agent. '
-		# 			'Call: await browser_session.start()'
-		# 		)
+		if browser_session:
+			# Check if user is trying to reuse an uninitialized session
+			if browser_session.browser_profile.keep_alive and not browser_session.initialized:
+				self.logger.error(
+					'❌ Passed a BrowserSession with keep_alive=True that is not initialized. '
+					'Call await browser_session.start() before passing it to Agent() to reuse the same browser. '
+					'Otherwise, each agent will launch its own browser instance.'
+				)
+				raise ValueError(
+					'BrowserSession with keep_alive=True must be initialized before passing to Agent. '
+					'Call: await browser_session.start()'
+				)
 
-		# 	# always copy sessions that are passed in to avoid agents overwriting each other's agent_current_page and human_current_page by accident
-		# 	self.browser_session = browser_session.model_copy(
-		# 		# update={
-		# 		# 	'agent_current_page': None,   # dont reset these, let the next agent start on the same page as the last agent
-		# 		# 	'human_current_page': None,
-		# 		# },
-		# 	)
-		# else:
-		# 	if browser is not None:
-		# 		assert isinstance(browser, Browser), 'Browser is not set up'
-		self.browser_session = browser_session
-
-		# BrowserSession(
-		# 	browser_profile=browser_profile,
-		# 	browser=browser,
-		# 	browser_context=browser_context,
-		# 	agent_current_page=page,
-		# 	id=uuid7str()[:-4] + self.id[-4:],  # re-use the same 4-char suffix so they show up together in logs
-		# )
+			# always copy sessions that are passed in to avoid agents overwriting each other's agent_current_page and human_current_page by accident
+			self.browser_session = browser_session.model_copy(
+				# update={
+				# 	'agent_current_page': None,   # dont reset these, let the next agent start on the same page as the last agent
+				# 	'human_current_page': None,
+				# },
+			)
+		else:
+			if browser is not None:
+				assert isinstance(browser, Browser), 'Browser is not set up'
+			self.browser_session = BrowserSession(
+				browser_profile=browser_profile,
+				browser=browser,
+				browser_context=browser_context,
+				agent_current_page=page,
+				id=uuid7str()[:-4] + self.id[-4:],  # re-use the same 4-char suffix so they show up together in logs
+			)
 
 		if self.sensitive_data:
 			# Check if sensitive_data has domain-specific credentials
