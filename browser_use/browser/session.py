@@ -2610,6 +2610,10 @@ class BrowserSession(BaseModel):
 			# 	)
 
 			try:
+				self.logger.debug('🖼️ Taking screenshot')
+				self.logger.debug(f'🖼️ Page URL: {page.url}')
+				self.logger.debug(f'🖼️ Page title: {await page.title()}')
+				self.logger.debug(f'🖼️ Browser PID: {self.browser_pid}')
 				screenshot_b64 = await self.take_screenshot()
 			except Exception as e:
 				self.logger.warning(f'Failed to capture screenshot: {type(e).__name__}: {e}')
@@ -2812,8 +2816,17 @@ class BrowserSession(BaseModel):
 
 		# We no longer force tabs to the foreground as it disrupts user focus
 		# await self.agent_current_page.bring_to_front()
+		self.logger.debug('🖼️ Getting current page')
 		page = await self.get_current_page()
+		self.logger.debug(f'🖼️ Page URL: {page.url}')
+		self.logger.debug(f'🖼️ Page title: {await page.title()}')
+		self.logger.debug('🖼️ Waiting for load state')
 		await page.wait_for_load_state()
+
+		self.logger.debug('🖼️ Taking screenshot')
+		self.logger.debug(f'🖼️ Full page: {full_page}')
+		self.logger.debug('🖼️ Animations: disabled')
+		self.logger.debug('🖼️ Caret: initial')
 
 		screenshot = await self.agent_current_page.screenshot(
 			full_page=full_page,
