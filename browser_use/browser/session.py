@@ -657,7 +657,7 @@ class BrowserSession(BaseModel):
 	@retry(
 		wait=2,  # wait 2s between each attempt to take a screenshot
 		retries=2,  # try up to 2 times to take the screenshot
-		timeout=35,  # allow up to 35s for each attempt to take a screenshot
+		timeout=35,  # allow up to 35s for each attempt to take a screenshot (can be overridden by browser_profile.screenshot_timeout)
 		semaphore_name='screenshot_global',
 		semaphore_limit=3,  # only 3 concurrent screenshots at a time total on the entire machine (ideally)
 		semaphore_scope='global',  # because it's a hardware VRAM bottleneck, chrome crashes if too many concurrent screenshots are rendered via CDP
@@ -666,35 +666,62 @@ class BrowserSession(BaseModel):
 	)
 	async def _take_screenshot_hybrid(self, page: Page, clip: dict[str, int] | None = None) -> str:
 		"""Take screenshot using CDP with Playwright fallback, with retry and semaphore protection."""
+
+		# Pre-flight checks to catch connection issues early
+		if page.is_closed():
+			raise RuntimeError('Page is closed, cannot take screenshot')
+
+		if not page.context.browser or not page.context.browser.is_connected():
+			raise RuntimeError('Browser context is disconnected, cannot take screenshot')
+
+		# Use configurable timeout from browser profile
+		timeout_seconds = self.browser_profile.screenshot_timeout
+
 		# Try CDP screenshot first with clip (faster)
 		try:
-			return await self._take_screenshot_cdp(
-				page,
-				**(clip or {}),
-			)
+			async with asyncio.timeout(timeout_seconds):
+				return await self._take_screenshot_cdp(
+					page,
+					**(clip or {}),
+				)
 		except Exception as e:
 			self.logger.debug(f'⚠️ CDP screenshot with clip failed: {type(e).__name__}: {e}')
 
 		# Try CDP screenshot without clip (full viewport)
 		try:
 			self.logger.debug('⚠️ Retrying CDP screenshot without clip parameter')
-			return await self._take_screenshot_cdp(page)
+			async with asyncio.timeout(timeout_seconds):
+				return await self._take_screenshot_cdp(page)
 		except Exception as e:
 			self.logger.debug(f'⚠️ CDP screenshot without clip failed: {type(e).__name__}: {e}')
 
 		# Fall back to Playwright screenshot
 		self.logger.debug('⚠️ Falling back to Playwright screenshot')
-		screenshot = await page.screenshot(
-			full_page=False,
-			scale='css',
-			timeout=self.browser_profile.default_timeout or 30000,
-			clip=FloatRect(**clip) if clip else None,
-			animations='allow',
-			caret='initial',
-		)
-		screenshot_b64 = base64.b64encode(screenshot).decode('utf-8')
-		assert screenshot_b64, 'Playwright page.screenshot() returned empty base64'
-		return screenshot_b64
+		try:
+			async with asyncio.timeout(timeout_seconds):
+				screenshot = await page.screenshot(
+					full_page=False,
+					scale='css',
+					timeout=self.browser_profile.default_timeout or 30000,
+					clip=FloatRect(**clip) if clip else None,
+					animations='allow',
+					caret='initial',
+				)
+				screenshot_b64 = base64.b64encode(screenshot).decode('utf-8')
+				assert screenshot_b64, 'Playwright page.screenshot() returned empty base64'
+				return screenshot_b64
+		except Exception as e:
+			# Provide specific error for Playwright fallback
+			if 'Target page, context or browser has been closed' in str(e):
+				raise RuntimeError(
+					f'Browser connection lost during Playwright screenshot fallback: {type(e).__name__}: {e}'
+				) from e
+			elif isinstance(e, TimeoutError):
+				raise TimeoutError(f'Playwright screenshot fallback timed out after {timeout_seconds}s: {e}') from e
+			else:
+				raise RuntimeError(
+					f'All screenshot methods failed. CDP failed, Playwright fallback also failed: {type(e).__name__}: {e}'
+				) from e
 
 	@retry(
 		wait=1,
@@ -2628,6 +2655,14 @@ class BrowserSession(BaseModel):
 		"""
 		cdp_session = None
 		try:
+			# Check if page is still valid before attempting screenshot
+			if page.is_closed():
+				raise RuntimeError('Page is closed, cannot take screenshot')
+
+			# Check if context is still connected
+			if not page.context.browser or not page.context.browser.is_connected():
+				raise RuntimeError('Browser context is disconnected, cannot take screenshot')
+
 			# Create CDP session for direct Chrome DevTools Protocol access
 			cdp_session = await page.context.new_cdp_session(page)  # type: ignore
 
@@ -2642,8 +2677,14 @@ class BrowserSession(BaseModel):
 			if not base64_screenshot:
 				raise ValueError('CDP Page.captureScreenshot() call returned empty base64')
 			return base64_screenshot
-		except Exception:
-			raise
+		except Exception as e:
+			# Provide more specific error information
+			if 'Target page, context or browser has been closed' in str(e):
+				raise RuntimeError(f'Browser connection lost during screenshot: {type(e).__name__}: {e}') from e
+			elif isinstance(e, TimeoutError):
+				raise TimeoutError(f'Screenshot operation timed out after waiting for CDP response: {e}') from e
+			else:
+				raise RuntimeError(f'CDP screenshot failed: {type(e).__name__}: {e}') from e
 		finally:
 			# Clean up CDP session
 			if cdp_session:
@@ -2662,6 +2703,14 @@ class BrowserSession(BaseModel):
 
 		# page has already loaded by this point, this is just extra for previous action animations/frame loads to settle
 		page = await self.get_current_page()
+
+		# Check connection state before proceeding
+		if page.is_closed():
+			raise RuntimeError('Current page is closed, cannot take screenshot')
+
+		if not page.context.browser or not page.context.browser.is_connected():
+			raise RuntimeError('Browser context is disconnected, cannot take screenshot')
+
 		try:
 			await page.wait_for_load_state(timeout=5000)
 		except Exception:
@@ -2671,11 +2720,14 @@ class BrowserSession(BaseModel):
 		capped_width = 1920
 		capped_height = 2000
 		desired_height = 2000
+		dimensions = None
+
 		try:
 			# Always use our clipping approach - never pass full_page=True to Playwright
 			# This prevents timeouts on very long pages
 
 			# 1. Get current viewport and page dimensions including scroll position
+
 			dimensions = await page.evaluate("""() => {
 				return {
 					width: Math.max(window.innerWidth, document.documentElement.clientWidth),
@@ -2720,11 +2772,18 @@ class BrowserSession(BaseModel):
 
 		# Take screenshot using our retry-decorated method
 		try:
+			# Double-check connection state before taking screenshot
+			if page.is_closed():
+				raise RuntimeError('Page was closed while setting up screenshot')
+
+			if not page.context.browser or not page.context.browser.is_connected():
+				raise RuntimeError('Browser context was disconnected while setting up screenshot')
+
 			return await self._take_screenshot_hybrid(
 				page,
 				clip={
-					'x': dimensions.get('scrollX', 0),
-					'y': dimensions.get('scrollY', 0),
+					'x': dimensions.get('scrollX', 0) if dimensions else 0,
+					'y': dimensions.get('scrollY', 0) if dimensions else 0,
 					'width': capped_width,
 					'height': capped_height,
 				},

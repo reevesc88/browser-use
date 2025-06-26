@@ -569,6 +569,7 @@ class BrowserProfile(BrowserConnectArgs, BrowserLaunchPersistentContextArgs, Bro
 	# --- Page load/wait timings ---
 	default_navigation_timeout: float | None = Field(default=None, description='Default page navigation timeout.')
 	default_timeout: float | None = Field(default=None, description='Default playwright call timeout.')
+	screenshot_timeout: float = Field(default=35.0, description='Timeout in seconds for screenshot operations.')
 	minimum_wait_page_load_time: float = Field(default=0.25, description='Minimum time to wait before capturing page state.')
 	wait_for_network_idle_page_load_time: float = Field(default=0.5, description='Time to wait for network idle.')
 	maximum_wait_page_load_time: float = Field(default=5.0, description='Maximum time to wait for page load.')
