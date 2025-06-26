@@ -2693,6 +2693,115 @@ class BrowserSession(BaseModel):
 				except Exception:
 					pass
 
+	# @require_initialization
+	# @time_execution_async('--take_screenshot')
+	# async def take_screenshot(self, full_page: bool = False) -> str:
+	# 	"""
+	# 	Returns a base64 encoded screenshot of the current page.
+	# 	"""
+	# 	assert self.agent_current_page is not None, 'Agent current page is not set'
+
+	# 	# page has already loaded by this point, this is just extra for previous action animations/frame loads to settle
+	# 	page = await self.get_current_page()
+
+	# 	# Check connection state before proceeding
+	# 	if page.is_closed():
+	# 		raise RuntimeError('Current page is closed, cannot take screenshot')
+
+	# 	if not page.context.browser or not page.context.browser.is_connected():
+	# 		raise RuntimeError('Browser context is disconnected, cannot take screenshot')
+
+	# 	try:
+	# 		await page.wait_for_load_state(timeout=5000)
+	# 	except Exception:
+	# 		pass
+
+	# 	original_viewport = None
+	# 	capped_width = 1920
+	# 	capped_height = 2000
+	# 	desired_height = 2000
+	# 	dimensions = None
+
+	# 	try:
+	# 		# Always use our clipping approach - never pass full_page=True to Playwright
+	# 		# This prevents timeouts on very long pages
+
+	# 		# 1. Get current viewport and page dimensions including scroll position
+
+	# 		dimensions = await page.evaluate("""() => {
+	# 			return {
+	# 				width: Math.max(window.innerWidth, document.documentElement.clientWidth),
+	# 				height: Math.max(window.innerHeight, document.documentElement.clientHeight),
+	# 				pageHeight: document.documentElement.scrollHeight,
+	# 				devicePixelRatio: window.devicePixelRatio || 1,
+	# 				scrollX: window.pageXOffset || document.documentElement.scrollLeft || 0,
+	# 				scrollY: window.pageYOffset || document.documentElement.scrollTop || 0
+	# 			};
+	# 		}""")
+
+	# 		# 2. Save current viewport state and calculate expanded dimensions
+	# 		viewport_expansion = self.browser_profile.viewport_expansion if self.browser_profile.viewport_expansion else 0
+
+	# 		capped_width = min(dimensions['width'], MAX_SCREENSHOT_HEIGHT)  # dont allow any dimension larger than the limit
+	# 		if full_page:
+	# 			# For full page, use the actual page height up to our max limit
+	# 			desired_height = dimensions['pageHeight']
+	# 		else:
+	# 			# For viewport screenshot, just use viewport + expansion
+	# 			desired_height = dimensions['height'] + viewport_expansion
+
+	# 		capped_height = min(desired_height, MAX_SCREENSHOT_HEIGHT)
+	# 		# if desired_height > capped_height:
+	# 		# 	self.logger.debug(
+	# 		# 		f'📐 Page viewport {desired_height}px exceeds max {capped_height}px limit for screenshots, taking top {capped_height}px only'
+	# 		# 	)
+
+	# 		# 3. Expand the viewport if we are using one
+	# 		original_viewport = page.viewport_size
+	# 		try:
+	# 			if original_viewport:
+	# 				# if we're already using a viewport, temporarily expand it to the desired size for the screenshot
+	# 				await self._set_viewport_size(page, {'width': capped_width, 'height': desired_height})
+	# 			else:
+	# 				# In headless mode without viewport, we always need to set one temporarily before taking a screenshot to limit rendering resource usage
+	# 				await self._set_viewport_size(page, {'width': capped_width, 'height': desired_height})
+	# 		except Exception as e:
+	# 			self.logger.error(f'❌ Failed to set up viewport for screenshot: {type(e).__name__}: {e}')
+	# 	except Exception as e:
+	# 		self.logger.error(f'❌ Failed to set up viewport for screenshot: {type(e).__name__}: {e}')
+
+	# 	# Take screenshot using our retry-decorated method
+	# 	try:
+	# 		# Double-check connection state before taking screenshot
+	# 		if page.is_closed():
+	# 			raise RuntimeError('Page was closed while setting up screenshot')
+
+	# 		if not page.context.browser or not page.context.browser.is_connected():
+	# 			raise RuntimeError('Browser context was disconnected while setting up screenshot')
+
+	# 		return await self._take_screenshot_hybrid(
+	# 			page,
+	# 			clip={
+	# 				'x': dimensions.get('scrollX', 0) if dimensions else 0,
+	# 				'y': dimensions.get('scrollY', 0) if dimensions else 0,
+	# 				'width': capped_width,
+	# 				'height': capped_height,
+	# 			},
+	# 		)
+	# 	except Exception as e:
+	# 		self.logger.error(f'❌ Failed to take screenshot after retries: {type(e).__name__}: {e}')
+	# 		raise
+	# 	finally:
+	# 		if original_viewport:
+	# 			# Viewport was originally enabled, restore to original dimensions
+	# 			try:
+	# 				await self._set_viewport_size(page, original_viewport)
+	# 			except Exception as e:
+	# 				self.logger.warning(
+	# 					f'⚠️ Failed to restore viewport to original size after screenshot: {type(e).__name__}: {e}'
+	# 				)
+
+	# region - Browser Actions
 	@require_initialization
 	@time_execution_async('--take_screenshot')
 	async def take_screenshot(self, full_page: bool = False) -> str:
@@ -2701,105 +2810,20 @@ class BrowserSession(BaseModel):
 		"""
 		assert self.agent_current_page is not None, 'Agent current page is not set'
 
-		# page has already loaded by this point, this is just extra for previous action animations/frame loads to settle
+		# We no longer force tabs to the foreground as it disrupts user focus
+		# await self.agent_current_page.bring_to_front()
 		page = await self.get_current_page()
+		await page.wait_for_load_state()
 
-		# Check connection state before proceeding
-		if page.is_closed():
-			raise RuntimeError('Current page is closed, cannot take screenshot')
+		screenshot = await self.agent_current_page.screenshot(
+			full_page=full_page,
+			animations='disabled',
+			caret='initial',
+		)
 
-		if not page.context.browser or not page.context.browser.is_connected():
-			raise RuntimeError('Browser context is disconnected, cannot take screenshot')
+		screenshot_b64 = base64.b64encode(screenshot).decode('utf-8')
 
-		try:
-			await page.wait_for_load_state(timeout=5000)
-		except Exception:
-			pass
-
-		original_viewport = None
-		capped_width = 1920
-		capped_height = 2000
-		desired_height = 2000
-		dimensions = None
-
-		try:
-			# Always use our clipping approach - never pass full_page=True to Playwright
-			# This prevents timeouts on very long pages
-
-			# 1. Get current viewport and page dimensions including scroll position
-
-			dimensions = await page.evaluate("""() => {
-				return {
-					width: Math.max(window.innerWidth, document.documentElement.clientWidth),
-					height: Math.max(window.innerHeight, document.documentElement.clientHeight),
-					pageHeight: document.documentElement.scrollHeight,
-					devicePixelRatio: window.devicePixelRatio || 1,
-					scrollX: window.pageXOffset || document.documentElement.scrollLeft || 0,
-					scrollY: window.pageYOffset || document.documentElement.scrollTop || 0
-				};
-			}""")
-
-			# 2. Save current viewport state and calculate expanded dimensions
-			viewport_expansion = self.browser_profile.viewport_expansion if self.browser_profile.viewport_expansion else 0
-
-			capped_width = min(dimensions['width'], MAX_SCREENSHOT_HEIGHT)  # dont allow any dimension larger than the limit
-			if full_page:
-				# For full page, use the actual page height up to our max limit
-				desired_height = dimensions['pageHeight']
-			else:
-				# For viewport screenshot, just use viewport + expansion
-				desired_height = dimensions['height'] + viewport_expansion
-
-			capped_height = min(desired_height, MAX_SCREENSHOT_HEIGHT)
-			# if desired_height > capped_height:
-			# 	self.logger.debug(
-			# 		f'📐 Page viewport {desired_height}px exceeds max {capped_height}px limit for screenshots, taking top {capped_height}px only'
-			# 	)
-
-			# 3. Expand the viewport if we are using one
-			original_viewport = page.viewport_size
-			try:
-				if original_viewport:
-					# if we're already using a viewport, temporarily expand it to the desired size for the screenshot
-					await self._set_viewport_size(page, {'width': capped_width, 'height': desired_height})
-				else:
-					# In headless mode without viewport, we always need to set one temporarily before taking a screenshot to limit rendering resource usage
-					await self._set_viewport_size(page, {'width': capped_width, 'height': desired_height})
-			except Exception as e:
-				self.logger.error(f'❌ Failed to set up viewport for screenshot: {type(e).__name__}: {e}')
-		except Exception as e:
-			self.logger.error(f'❌ Failed to set up viewport for screenshot: {type(e).__name__}: {e}')
-
-		# Take screenshot using our retry-decorated method
-		try:
-			# Double-check connection state before taking screenshot
-			if page.is_closed():
-				raise RuntimeError('Page was closed while setting up screenshot')
-
-			if not page.context.browser or not page.context.browser.is_connected():
-				raise RuntimeError('Browser context was disconnected while setting up screenshot')
-
-			return await self._take_screenshot_hybrid(
-				page,
-				clip={
-					'x': dimensions.get('scrollX', 0) if dimensions else 0,
-					'y': dimensions.get('scrollY', 0) if dimensions else 0,
-					'width': capped_width,
-					'height': capped_height,
-				},
-			)
-		except Exception as e:
-			self.logger.error(f'❌ Failed to take screenshot after retries: {type(e).__name__}: {e}')
-			raise
-		finally:
-			if original_viewport:
-				# Viewport was originally enabled, restore to original dimensions
-				try:
-					await self._set_viewport_size(page, original_viewport)
-				except Exception as e:
-					self.logger.warning(
-						f'⚠️ Failed to restore viewport to original size after screenshot: {type(e).__name__}: {e}'
-					)
+		return screenshot_b64
 
 	# region - User Actions
 
