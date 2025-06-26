@@ -2828,7 +2828,7 @@ class BrowserSession(BaseModel):
 		self.logger.debug('🖼️ Animations: disabled')
 		self.logger.debug('🖼️ Caret: initial')
 
-		screenshot = await self.agent_current_page.screenshot(
+		screenshot = await page.screenshot(
 			full_page=full_page,
 			animations='disabled',
 			caret='initial',
