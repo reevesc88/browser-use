@@ -304,10 +304,10 @@ class Agent(Generic[Context]):
 			# always copy sessions that are passed in to avoid conflicting with other agents sharing the same session
 			self.browser_session = browser_session.model_copy(
 				deep=True,
-				update={
-					'agent_current_page': None,
-					'human_current_page': None,
-				},
+				# update={
+				# 	'agent_current_page': None,
+				# 	'human_current_page': None,
+				# },
 			)
 		else:
 			self.browser_session = BrowserSession(
