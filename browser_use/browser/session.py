@@ -788,8 +788,12 @@ class BrowserSession(BaseModel):
 		if self.browser_context:
 			return
 
-		# Launch new browser as last resort
-		await self.setup_new_browser_context()
+		# No connection method succeeded - raise an exception instead of launching a new browser
+		raise ConnectionError(
+			"Failed to connect to browser using any available connection method. "
+			"Please ensure a browser is running and accessible via one of the following methods: "
+			"browser_pid, wss_url, cdp_url, or provide existing playwright objects (page, browser_context, browser, playwright)."
+		)
 
 	# Removed _take_screenshot_hybrid - merged into take_screenshot
 
@@ -958,33 +962,28 @@ class BrowserSession(BaseModel):
 								self.logger.error(f'❌ Chrome process {self.browser_pid} exited: Failed parsing extensions')
 								raise RuntimeError('Failed parsing extensions: Chrome profile incompatibility detected')
 							elif 'SingletonLock' in stderr_output or 'ProcessSingleton' in stderr_output:
-								# Chrome exited due to singleton lock
-								self._fallback_to_temp_profile('Chrome process exit due to SingletonLock')
-								# Kill the subprocess and retry with new profile
+								# Chrome exited due to singleton lock - do not launch new browser as fallback
+								self.logger.error(f'❌ Chrome process {self.browser_pid} exited due to SingletonLock error')
+								# Kill the subprocess
 								try:
 									self._subprocess.terminate()
 									await self._subprocess.wait()
 								except Exception:
 									pass
 								self.browser_pid = None
-								# Retry with the new temp directory
-								await self._unsafe_setup_new_browser_context()
 								return
 							else:
-								# Chrome exited for unknown reason, try fallback to temp profile
-								self.logger.warning(
-									f'⚠️ Chrome process {self.browser_pid} exited unexpectedly. Error: {stderr_output[:500] if stderr_output else "No error output"}'
+								# Chrome exited for unknown reason - do not launch new browser as fallback
+								self.logger.error(
+									f'❌ Chrome process {self.browser_pid} exited unexpectedly. Error: {stderr_output[:500] if stderr_output else "No error output"}'
 								)
-								self._fallback_to_temp_profile('Chrome process exit with unknown error')
-								# Kill the subprocess and retry with new profile
+								# Kill the subprocess
 								try:
 									self._subprocess.terminate()
 									await self._subprocess.wait()
 								except Exception:
 									pass
 								self.browser_pid = None
-								# Retry with the new temp directory
-								await self._unsafe_setup_new_browser_context()
 								return
 						self.logger.error(f'❌ Chrome process {self.browser_pid} exited unexpectedly')
 						self.browser_pid = None
