@@ -299,59 +299,92 @@ Only use this for specific queries for information retrieval from the page. Don'
 			page: Page,
 			page_extraction_llm: BaseChatModel,
 			file_system: FileSystem,
+			browser_session: BrowserSession,
 		):
 			from functools import partial
 
 			import markdownify
 
-			strip = []
-
-			if not extract_links:
-				strip = ['a', 'img']
-
-			# Run markdownify in a thread pool to avoid blocking the event loop
-			loop = asyncio.get_event_loop()
-
-			# Aggressive timeout for page content
+			# Check if this is a PDF viewer and handle specially
 			try:
-				page_html_result = await asyncio.wait_for(page.content(), timeout=10.0)  # 5 second aggressive timeout
-			except TimeoutError:
-				raise RuntimeError('Page content extraction timed out after 5 seconds')
-			except Exception as e:
-				raise RuntimeError(f"Couldn't extract page content: {e}")
+				pdf_content = await browser_session._extract_pdf_content_from_page(page)
+				if pdf_content:
+					logger.info(f'📄 PDF viewer detected for extraction, using PDF content')
+					content = pdf_content
+				else:
+					# Regular web page processing
+					strip = []
 
-			page_html = page_html_result
+					if not extract_links:
+						strip = ['a', 'img']
 
-			markdownify_func = partial(markdownify.markdownify, strip=strip)
+					# Run markdownify in a thread pool to avoid blocking the event loop
+					loop = asyncio.get_event_loop()
 
-			try:
-				content = await asyncio.wait_for(
-					loop.run_in_executor(None, markdownify_func, page_html), timeout=5.0
-				)  # 5 second aggressive timeout
-			except Exception as e:
-				logger.warning(f'Markdownify failed: {type(e).__name__}')
-				raise RuntimeError(f'Could not convert html to markdown: {type(e).__name__}')
-
-			# manually append iframe text into the content so it's readable by the LLM (includes cross-origin iframes)
-			for iframe in page.frames:
-				try:
-					await iframe.wait_for_load_state(timeout=1000)  # 1 second aggressive timeout for iframe load
-				except Exception:
-					pass
-
-				if iframe.url != page.url and not iframe.url.startswith('data:') and not iframe.url.startswith('about:'):
-					content += f'\n\nIFRAME {iframe.url}:\n'
-					# Run markdownify in a thread pool for iframe content as well
+					# Aggressive timeout for page content
 					try:
-						# Aggressive timeouts for iframe content
-						iframe_html = await asyncio.wait_for(iframe.content(), timeout=2.0)  # 2 second aggressive timeout
-						iframe_markdown = await asyncio.wait_for(
-							loop.run_in_executor(None, markdownify_func, iframe_html),
-							timeout=2.0,  # 2 second aggressive timeout for iframe markdownify
-						)
-					except Exception:
-						iframe_markdown = ''  # Skip failed iframes
-					content += iframe_markdown
+						page_html_result = await asyncio.wait_for(page.content(), timeout=10.0)  # 5 second aggressive timeout
+					except TimeoutError:
+						raise RuntimeError('Page content extraction timed out after 5 seconds')
+					except Exception as e:
+						raise RuntimeError(f"Couldn't extract page content: {e}")
+
+					page_html = page_html_result
+
+					markdownify_func = partial(markdownify.markdownify, strip=strip)
+
+					try:
+						content = await asyncio.wait_for(
+							loop.run_in_executor(None, markdownify_func, page_html), timeout=5.0
+						)  # 5 second aggressive timeout
+					except Exception as e:
+						logger.warning(f'Markdownify failed: {type(e).__name__}')
+						raise RuntimeError(f'Could not convert html to markdown: {type(e).__name__}')
+
+					# manually append iframe text into the content so it's readable by the LLM (includes cross-origin iframes)
+					for iframe in page.frames:
+						try:
+							await iframe.wait_for_load_state(timeout=1000)  # 1 second aggressive timeout for iframe load
+						except Exception:
+							pass
+
+						if iframe.url != page.url and not iframe.url.startswith('data:') and not iframe.url.startswith('about:'):
+							content += f'\n\nIFRAME {iframe.url}:\n'
+							# Run markdownify in a thread pool for iframe content as well
+							try:
+								# Aggressive timeouts for iframe content
+								iframe_html = await asyncio.wait_for(iframe.content(), timeout=2.0)  # 2 second aggressive timeout
+								iframe_markdown = await asyncio.wait_for(
+									loop.run_in_executor(None, markdownify_func, iframe_html),
+									timeout=2.0,  # 2 second aggressive timeout for iframe markdownify
+								)
+							except Exception:
+								iframe_markdown = ''  # Skip failed iframes
+							content += iframe_markdown
+			except Exception as e:
+				logger.warning(f'Failed to check for PDF content: {type(e).__name__}: {e}')
+				# Fall back to regular processing
+				strip = []
+				if not extract_links:
+					strip = ['a', 'img']
+
+				loop = asyncio.get_event_loop()
+				try:
+					page_html_result = await asyncio.wait_for(page.content(), timeout=10.0)
+				except TimeoutError:
+					raise RuntimeError('Page content extraction timed out after 5 seconds')
+				except Exception as e:
+					raise RuntimeError(f"Couldn't extract page content: {e}")
+
+				markdownify_func = partial(markdownify.markdownify, strip=strip)
+				try:
+					content = await asyncio.wait_for(
+						loop.run_in_executor(None, markdownify_func, page_html_result), timeout=5.0
+					)
+				except Exception as e:
+					logger.warning(f'Markdownify failed: {type(e).__name__}')
+					raise RuntimeError(f'Could not convert html to markdown: {type(e).__name__}')
+
 			# replace multiple sequential \n with a single \n
 			content = re.sub(r'\n+', '\n', content)
 

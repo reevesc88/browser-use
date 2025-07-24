@@ -3208,6 +3208,24 @@ class BrowserSession(BaseModel):
 			except Exception as e:
 				self.logger.debug(f'PDF auto-download check failed: {type(e).__name__}: {e}')
 
+			# Check if this is a PDF viewer and handle it specially
+			self.logger.debug('📄 Checking for PDF viewer...')
+			pdf_content = await self._extract_pdf_content_from_page(page)
+			
+			if pdf_content:
+				self.logger.info(f'📄 PDF viewer detected, creating PDF browser state')
+				# Get tabs info for PDF state
+				self.logger.debug('📋 Getting tabs info for PDF...')
+				tabs_info = await self.get_tabs_info()
+				self.logger.debug('✅ Tabs info completed for PDF')
+				
+				# Create and return PDF-specific browser state
+				pdf_state = await self._create_pdf_browser_state(page, pdf_content, tabs_info, include_screenshot)
+				self.browser_state_summary = pdf_state
+				self.logger.debug('✅ PDF browser state created successfully')
+				return self.browser_state_summary
+
+			# Regular non-PDF page processing
 			self.logger.debug('🌳 Starting DOM processing...')
 			from browser_use.dom.service import DomService
 
@@ -4675,3 +4693,162 @@ class BrowserSession(BaseModel):
 		except Exception as e:
 			self.logger.warning(f'⚠️ Error in PDF auto-download check: {type(e).__name__}: {e}')
 			return None
+
+	async def _extract_pdf_content_from_page(self, page: Page) -> str | None:
+		"""
+		Extract PDF content from the current page if it's a PDF viewer.
+		Returns the PDF text content or None if not a PDF viewer or extraction fails.
+		"""
+		try:
+			# Check if this is a PDF viewer
+			is_pdf_viewer = await self._is_pdf_viewer(page)
+			if not is_pdf_viewer:
+				return None
+
+			# Get the PDF URL
+			pdf_url = page.url
+
+			# Download the PDF content using JavaScript fetch to get the raw bytes
+			try:
+				self.logger.debug(f'Extracting PDF content from URL: {pdf_url}')
+
+				# Properly escape the URL to prevent JavaScript injection
+				import json
+				escaped_pdf_url = json.dumps(pdf_url)
+
+				pdf_content_result = await page.evaluate(f"""
+					async () => {{
+						try {{
+							// Use fetch with cache: 'force-cache' to prioritize cached version
+							const response = await fetch({escaped_pdf_url}, {{
+								cache: 'force-cache'
+							}});
+							if (!response.ok) {{
+								throw new Error(`HTTP error! status: ${{response.status}}`);
+							}}
+							const arrayBuffer = await response.arrayBuffer();
+							const uint8Array = new Uint8Array(arrayBuffer);
+							
+							// Convert to base64 for transmission
+							let binary = '';
+							uint8Array.forEach(byte => binary += String.fromCharCode(byte));
+							return btoa(binary);
+						}} catch (error) {{
+							throw error;
+						}}
+					}}
+				""")
+
+				if not pdf_content_result:
+					self.logger.warning('Failed to extract PDF content: empty result')
+					return None
+
+				# Decode base64 and extract text using pypdf
+				import base64
+				import io
+				import pypdf
+
+				pdf_bytes = base64.b64decode(pdf_content_result)
+				
+				# Use BytesIO to create a file-like object
+				pdf_file = io.BytesIO(pdf_bytes)
+				reader = pypdf.PdfReader(pdf_file)
+				
+				# Extract text from all pages (limit to reasonable number)
+				MAX_PDF_PAGES = 20
+				extracted_text = ''
+				num_pages = len(reader.pages)
+				pages_to_process = min(num_pages, MAX_PDF_PAGES)
+				
+				for i in range(pages_to_process):
+					try:
+						page_text = reader.pages[i].extract_text()
+						if page_text:
+							extracted_text += f'\n--- Page {i + 1} ---\n{page_text}\n'
+					except Exception as e:
+						self.logger.debug(f'Failed to extract text from PDF page {i + 1}: {e}')
+						continue
+
+				if pages_to_process < num_pages:
+					extracted_text += f'\n... PDF has {num_pages - pages_to_process} more pages ...\n'
+
+				if not extracted_text.strip():
+					self.logger.warning('PDF text extraction resulted in empty content')
+					return None
+
+				self.logger.info(f'📄 Successfully extracted PDF content: {len(extracted_text)} characters from {pages_to_process} pages')
+				return extracted_text.strip()
+
+			except Exception as e:
+				self.logger.warning(f'Failed to extract PDF content from {pdf_url}: {type(e).__name__}: {e}')
+				return None
+
+		except Exception as e:
+			self.logger.debug(f'PDF content extraction failed: {type(e).__name__}: {e}')
+			return None
+
+	async def _create_pdf_browser_state(self, page: Page, pdf_content: str, tabs_info: list, include_screenshot: bool = True) -> 'BrowserStateSummary':
+		"""
+		Create a special browser state for PDF viewers that shows PDF content without clickable elements.
+		"""
+		from browser_use.browser.views import BrowserStateSummary
+		from browser_use.dom.views import DOMElementNode, DOMTextNode
+
+		# Create a text node with the PDF content
+		pdf_text_node = DOMTextNode(
+			text=pdf_content[:10000] + '...' if len(pdf_content) > 10000 else pdf_content,  # Limit displayed content
+			is_visible=True,
+			parent=None,
+		)
+
+		# Create a body element containing the PDF text
+		pdf_body_element = DOMElementNode(
+			tag_name='body',
+			xpath='/body',
+			attributes={'data-pdf-viewer': 'true'},
+			children=[pdf_text_node],
+			is_visible=True,
+			is_interactive=False,
+			is_top_element=True,
+			is_in_viewport=True,
+			shadow_root=False,
+			highlight_index=None,  # No clickable elements in PDF viewer
+			parent=None,
+		)
+
+		# Set parent relationship
+		pdf_text_node.parent = pdf_body_element
+
+		# Get title
+		try:
+			title = await asyncio.wait_for(page.title(), timeout=3.0)
+			# Add PDF indicator to title
+			if 'PDF' not in title.upper():
+				title = f'PDF: {title}'
+		except Exception:
+			title = 'PDF Document'
+
+		# Handle screenshot
+		screenshot_b64 = None
+		if include_screenshot:
+			try:
+				self.logger.debug('📸 Capturing PDF screenshot...')
+				screenshot_b64 = await self.take_screenshot()
+			except Exception as e:
+				self.logger.warning(f'❌ PDF screenshot failed: {type(e).__name__} {e}')
+
+		# Get page info (keep basic info)
+		page_info = await self.get_page_info(page)
+
+		return BrowserStateSummary(
+			element_tree=pdf_body_element,
+			selector_map={},  # Empty - no clickable elements in PDF viewer
+			url=page.url,
+			title=title,
+			tabs=tabs_info,
+			screenshot=screenshot_b64,
+			page_info=page_info,
+			pixels_above=0,
+			pixels_below=0,
+			browser_errors=[],
+		)

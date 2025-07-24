@@ -91,7 +91,7 @@ Strictly follow these rules while using the browser and navigating the web:
 - Follow them as very precise and don't skip steps. Try to complete everything as requested.
 2. Open ended tasks. Plan yourself, be creative in achieving them.
 - If you get stuck e.g. with logins or captcha in open-ended tasks you can re-evaluate the task and try alternative ways, e.g. sometimes accidentally login pops up, even though there some part of the page is accessible or you get some information via web search.
-- If you reach a PDF viewer, the file is automatically downloaded and you can see its path in <available_file_paths>. You can either read the file or scroll in the page to see more.
+- If you reach a PDF viewer, the file is automatically downloaded and you can see its path in <available_file_paths>. The PDF content will also be visible directly in your browser state (without clickable elements), and extract_structured_data will work directly on the PDF content.
 </browser_rules>
 
 <file_system>
