@@ -3165,26 +3165,33 @@ class BrowserSession(BaseModel):
 		except Exception:
 			tabs_info = []
 
-		# Create minimal DOM element for error state
-		minimal_element_tree = DOMElementNode(
-			tag_name='body',
-			xpath='/body',
-			attributes={},
-			children=[],
-			is_visible=True,
-			parent=None,
-		)
+			# Create minimal DOM element for error state
+	minimal_element_tree = DOMElementNode(
+		tag_name='body',
+		xpath='/body',
+		attributes={},
+		children=[],
+		is_visible=True,
+		parent=None,
+	)
 
-		return BrowserStateSummary(
-			element_tree=minimal_element_tree,  # Minimal DOM tree
-			selector_map={},  # Empty selector map
-			url=url,
-			title=title,
-			tabs=tabs_info,
-			pixels_above=0,
-			pixels_below=0,
-			browser_errors=[f'Page state retrieval failed, minimal recovery applied for {url}'],
-		)
+	# Check if current page is a PDF viewer (even in minimal state)
+	try:
+		is_pdf_viewer = await self._is_pdf_viewer(page)
+	except Exception:
+		is_pdf_viewer = False
+
+	return BrowserStateSummary(
+		element_tree=minimal_element_tree,  # Minimal DOM tree
+		selector_map={},  # Empty selector map
+		url=url,
+		title=title,
+		tabs=tabs_info,
+		pixels_above=0,
+		pixels_below=0,
+		browser_errors=[f'Page state retrieval failed, minimal recovery applied for {url}'],
+		is_pdf_viewer=is_pdf_viewer,
+	)
 
 	@observe_debug(ignore_input=True, ignore_output=True, name='get_updated_state')
 	async def _get_updated_state(self, focus_element: int = -1, include_screenshot: bool = True) -> BrowserStateSummary:
@@ -3294,25 +3301,29 @@ class BrowserSession(BaseModel):
 			except Exception:
 				title = 'Title unavailable'
 
-			# Check if this is a minimal fallback state
-			browser_errors = []
-			if not content.selector_map:  # Empty selector map indicates fallback state
-				browser_errors.append(
-					f'DOM processing timed out for {page.url} - using minimal state. Basic navigation still available via go_to_url, scroll, and search actions.'
-				)
-
-			self.browser_state_summary = BrowserStateSummary(
-				element_tree=content.element_tree,
-				selector_map=content.selector_map,
-				url=page.url,
-				title=title,
-				tabs=tabs_info,
-				screenshot=screenshot_b64,
-				page_info=page_info,
-				pixels_above=pixels_above,
-				pixels_below=pixels_below,
-				browser_errors=browser_errors,
+					# Check if this is a minimal fallback state
+		browser_errors = []
+		if not content.selector_map:  # Empty selector map indicates fallback state
+			browser_errors.append(
+				f'DOM processing timed out for {page.url} - using minimal state. Basic navigation still available via go_to_url, scroll, and search actions.'
 			)
+
+		# Check if current page is a PDF viewer
+		is_pdf_viewer = await self._is_pdf_viewer(page)
+
+		self.browser_state_summary = BrowserStateSummary(
+			element_tree=content.element_tree,
+			selector_map=content.selector_map,
+			url=page.url,
+			title=title,
+			tabs=tabs_info,
+			screenshot=screenshot_b64,
+			page_info=page_info,
+			pixels_above=pixels_above,
+			pixels_below=pixels_below,
+			browser_errors=browser_errors,
+			is_pdf_viewer=is_pdf_viewer,
+		)
 
 			self.logger.debug('✅ get_state_summary completed successfully')
 			return self.browser_state_summary

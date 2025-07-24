@@ -136,6 +136,11 @@ class AgentMessagePrompt:
 
 	@observe_debug(ignore_input=True, ignore_output=True, name='_get_browser_state_description')
 	def _get_browser_state_description(self) -> str:
+		# Check if page is a PDF viewer and add special message
+		pdf_viewer_message = ""
+		if getattr(self.browser_state, 'is_pdf_viewer', False):
+			pdf_viewer_message = "PDF viewer cannot be rendered. In this page, extract_structured_data does not work. Use the read_file action on the downloaded PDF in available_file_paths to read the full content.\n\n"
+
 		elements_text = self.browser_state.element_tree.clickable_elements_to_string(include_attributes=self.include_attributes)
 
 		if len(elements_text) > self.max_clickable_elements_length:
@@ -197,7 +202,7 @@ class AgentMessagePrompt:
 
 		current_tab_text = f'Current tab: {current_tab_id}' if current_tab_id is not None else ''
 
-		browser_state = f"""{current_tab_text}
+		browser_state = f"""{pdf_viewer_message}{current_tab_text}
 Available tabs:
 {tabs_text}
 {page_info_text}
