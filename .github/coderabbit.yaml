@@ -1,0 +1,16 @@
+language: "en-US"
+tone_instructions: "Be concise. Flag async safety issues, Playwright API misuse, and missing error handling. Skip style nitpicks."
+reviews:
+  profile: "chill"
+  auto_review:
+    enabled: true
+    drafts: false
+    base_branches: ["main"]
+  path_filters:
+    - "!*.lock"
+    - "!node_modules/**"
+    - "!__pycache__/**"
+    - "!*.pyc"
+    - "!tests/ci/**"
+chat:
+  auto_reply: true
