@@ -1,0 +1,338 @@
+# Instincts generated from https://github.com/reevesc88/browser-use
+# Generated: 2026-07-07T15:50:05.133Z
+# Version: 2.0
+# NOTE: This file supplements (does not replace) any existing curated instincts.
+# High-confidence manually curated instincts should be preserved alongside these.
+
+---
+id: browser-use-commit-conventional
+trigger: "when writing a commit message"
+confidence: 0.85
+domain: git
+source: repo-analysis
+source_repo: https://github.com/reevesc88/browser-use
+---
+
+# Browser Use Commit Conventional
+
+## Action
+
+Use conventional commit format with prefixes: feat
+
+## Evidence
+
+- 1 commits analyzed
+- Detected conventional commit pattern
+- Examples: feat: wire CodeRabbit + Copilot review bots
+
+---
+id: browser-use-commit-length
+trigger: "when writing a commit message"
+confidence: 0.6
+domain: git
+source: repo-analysis
+source_repo: https://github.com/reevesc88/browser-use
+---
+
+# Browser Use Commit Length
+
+## Action
+
+Keep commit messages concise (~43 characters)
+
+## Evidence
+
+- Average commit message length: 43 chars
+- Based on 1 commits
+
+---
+id: browser-use-naming-files
+trigger: "when creating a new file"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: https://github.com/reevesc88/browser-use
+---
+
+# Browser Use Naming Files
+
+## Action
+
+Use kebab-case naming convention
+
+## Evidence
+
+- Analyzed file naming patterns in repository
+- Dominant pattern: kebab-case
+
+---
+id: browser-use-import-relative
+trigger: "when importing modules"
+confidence: 0.75
+domain: code-style
+source: repo-analysis
+source_repo: https://github.com/reevesc88/browser-use
+---
+
+# Browser Use Import Relative
+
+## Action
+
+Use relative imports for project files
+
+## Evidence
+
+- Import analysis shows relative import pattern
+- Example: import { x } from '../lib/x'
+
+---
+id: browser-use-export-style
+trigger: "when exporting from a module"
+confidence: 0.7
+domain: code-style
+source: repo-analysis
+source_repo: https://github.com/reevesc88/browser-use
+---
+
+# Browser Use Export Style
+
+## Action
+
+Prefer named exports
+
+## Evidence
+
+- Export pattern analysis
+- Dominant style: named
+
+---
+id: browser-use-test-separate
+trigger: "when writing tests"
+confidence: 0.8
+domain: testing
+source: repo-analysis
+source_repo: https://github.com/reevesc88/browser-use
+---
+
+# Browser Use Test Separate
+
+## Action
+
+Place tests in the tests/ or __tests__/ directory, mirroring src structure
+
+## Evidence
+
+- Separate test directory pattern detected
+- Tests live in dedicated test folders
+
+---
+id: browser-use-instinct-file-naming
+trigger: "When creating a new file"
+confidence: 0.9
+domain: code-style
+source: repo-analysis
+source_repo: reevesc88/browser-use
+---
+
+# Browser Use Instinct File Naming
+
+## Action
+
+Name the file using kebab-case
+
+## Evidence
+
+- Pattern in namingConventions.files
+
+---
+id: browser-use-instinct-function-naming
+trigger: "When defining a new function"
+confidence: 0.9
+domain: code-style
+source: repo-analysis
+source_repo: reevesc88/browser-use
+---
+
+# Browser Use Instinct Function Naming
+
+## Action
+
+Use camelCase for function names
+
+## Evidence
+
+- Pattern in namingConventions.functions
+
+---
+id: browser-use-instinct-class-naming
+trigger: "When defining a new class"
+confidence: 0.9
+domain: code-style
+source: repo-analysis
+source_repo: reevesc88/browser-use
+---
+
+# Browser Use Instinct Class Naming
+
+## Action
+
+Use PascalCase for class names
+
+## Evidence
+
+- Pattern in namingConventions.classes
+
+---
+id: browser-use-instinct-constant-naming
+trigger: "When defining a constant"
+confidence: 0.9
+domain: code-style
+source: repo-analysis
+source_repo: reevesc88/browser-use
+---
+
+# Browser Use Instinct Constant Naming
+
+## Action
+
+Use SCREAMING_SNAKE_CASE for constant names
+
+## Evidence
+
+- Pattern in namingConventions.constants
+
+---
+id: browser-use-instinct-import-style
+trigger: "When importing modules"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: reevesc88/browser-use
+---
+
+# Browser Use Instinct Import Style
+
+## Action
+
+Use relative import paths
+
+## Evidence
+
+- Pattern in importStyle
+
+---
+id: browser-use-instinct-export-style
+trigger: "When exporting from a module"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: reevesc88/browser-use
+---
+
+# Browser Use Instinct Export Style
+
+## Action
+
+Use named exports
+
+## Evidence
+
+- Pattern in exportStyle
+
+---
+id: browser-use-instinct-test-location
+trigger: "When adding new tests"
+confidence: 0.8
+domain: testing
+source: repo-analysis
+source_repo: reevesc88/browser-use
+---
+
+# Browser Use Instinct Test Location
+
+## Action
+
+Place tests in a separate directory from source code
+
+## Evidence
+
+- Pattern in architecture.folderStructure.testLocation
+
+---
+id: browser-use-instinct-git-commit-prefix
+trigger: "When writing a commit message for a new feature"
+confidence: 0.9
+domain: git
+source: repo-analysis
+source_repo: reevesc88/browser-use
+---
+
+# Browser Use Instinct Git Commit Prefix
+
+## Action
+
+Prefix the commit message with 'feat:'
+
+## Evidence
+
+- Seen in commit 'feat: wire CodeRabbit + Copilot review bots'
+- Pattern in commits.prefixes
+
+---
+id: browser-use-instinct-git-commit-format
+trigger: "When writing a commit message"
+confidence: 0.9
+domain: git
+source: repo-analysis
+source_repo: reevesc88/browser-use
+---
+
+# Browser Use Instinct Git Commit Format
+
+## Action
+
+Follow the Conventional Commits format
+
+## Evidence
+
+- Pattern in commits.type
+- Seen in commit 'feat: wire CodeRabbit + Copilot review bots'
+
+---
+id: browser-use-instinct-coderabbit-workflow
+trigger: "When configuring CI/CD or automation"
+confidence: 0.8
+domain: workflow
+source: repo-analysis
+source_repo: reevesc88/browser-use
+---
+
+# Browser Use Instinct Coderabbit Workflow
+
+## Action
+
+Include a workflow file at .github/workflows/coderabbit-trigger.yml for CodeRabbit integration
+
+## Evidence
+
+- Pattern in architecture.configFiles
+
+---
+id: browser-use-instinct-copilot-workflow
+trigger: "When configuring CI/CD or automation"
+confidence: 0.8
+domain: workflow
+source: repo-analysis
+source_repo: reevesc88/browser-use
+---
+
+# Browser Use Instinct Copilot Workflow
+
+## Action
+
+Include a workflow file at .github/workflows/copilot-review.yml for Copilot review integration
+
+## Evidence
+
+- Pattern in architecture.configFiles
+
